@@ -1,0 +1,12 @@
+# Blender 4.5.4 LTS MTL File: 'drone.blend'
+# www.blender.org
+
+newmtl da82c663-8715-4b2b-b635-64f3902b5610
+Ns 29.999998
+Ka 1.000000 1.000000 1.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 1
+map_Kd C:/Users/paola/OneDrive/Documentos/Skyspec/3Dmodels/uav-drone-shop-war-thunder-props/source/_uav_recon_drone_shop/textures/uav_quadcopter_c.jpg
+map_Ks C:/Users/paola/OneDrive/Documentos/Skyspec/3Dmodels/uav-drone-shop-war-thunder-props/source/_uav_recon_drone_shop/textures/uav_quadcopter_n_s.jpg
