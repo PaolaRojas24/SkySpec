@@ -16,7 +16,7 @@ UR_GRIPPER_CFG = ArticulationCfg(
 
 # Where is the USD file for this robot?
 spawn=sim_utils.UsdFileCfg(       
-    usd_path=f"/home/paoro/Desktop/SkySpec/Omniverse/IsaacSim/Courses/UR-with-gripper.usd", 
+    usd_path=f"Reach/source/Reach/Reach/tasks/manager_based/reach/UR-with-gripper.usd", 
         activate_contact_sensors=False,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             rigid_body_enabled=True,
