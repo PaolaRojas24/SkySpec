@@ -138,7 +138,3 @@ While not implemented yet, future work could include:
 * Exploring alternative simulators with native drone support (e.g., AirSim, PyBullet-based drones).
 * Treating the drone as a learning problem at a higher abstraction level (desired accelerations instead of rotor speeds).
 * Freezing the software stack to a known working reference configuration before further development.
-
----
-
-This document is intended to provide transparency on the technical challenges encountered and to justify the design decisions and pivots made during the project.
