@@ -1,135 +1,183 @@
-# Template for Isaac Lab Projects
+# Project Drone
 
-## Overview
+## Environment Design, Execution Errors, and Analysis
 
-This project/repository serves as a template for building projects or extensions based on Isaac Lab.
-It allows you to develop in an isolated environment, outside of the core Isaac Lab repository.
+### 1. Project Overview
 
-**Key Features:**
+The **Drone** project aims to implement a reinforcement learning environment for a quadrotor UAV using **Isaac Lab** and **SKRL**. The environment is designed following the *DirectRLEnv* paradigm, with continuous control over thrust and moments applied directly to the drone’s base body. The long-term goal is to learn stable hovering and goal-reaching behaviors in 3D space.
 
-- `Isolation` Work outside the core Isaac Lab repository, ensuring that your development efforts remain self-contained.
-- `Flexibility` This template is set up to allow your code to be run as an extension in Omniverse.
+This project represents the most complete and conceptually correct attempt within the overall drone RL effort, as it aligns closely with official Isaac Lab quadcopter examples. However, execution was ultimately blocked by task registration and configuration mismatches.
 
-**Keywords:** extension, template, isaaclab
+---
 
-## Installation
+### 2. Environment Architecture
 
-- Install Isaac Lab by following the [installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html).
-  We recommend using the conda or uv installation as it simplifies calling Python scripts from the terminal.
+#### 2.1 Environment Type
 
-- Clone or copy this project/repository separately from the Isaac Lab installation (i.e. outside the `IsaacLab` directory):
+* **Base class**: `DirectRLEnv`
+* **Configuration class**: `QuadcopterEnvCfg`
+* **Runtime class**: `QuadcopterEnv`
 
-- Using a python interpreter that has Isaac Lab installed, install the library in editable mode using:
+The environment directly applies forces and torques to the quadcopter body using Isaac Lab’s low-level physics API, bypassing joint-level actuation.
 
-    ```bash
-    # use 'PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-    python -m pip install -e source/Drone
+#### 2.2 Simulation and Scene Setup
 
-- Verify that the extension is correctly installed by:
+Key characteristics:
 
-    - Listing the available tasks:
+* Physics timestep: 100 Hz (`dt = 1/100`)
+* Vectorized simulation with **4096 parallel environments**
+* Flat terrain using `TerrainImporterCfg`
+* Dome lighting for visualization
 
-        Note: It the task name changes, it may be necessary to update the search pattern `"Template-"`
-        (in the `scripts/list_envs.py` file) so that it can be listed.
+The scene is replicated using Fabric cloning for performance, which is standard practice in Isaac Lab for large-scale RL training.
 
-        ```bash
-        # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-        python scripts/list_envs.py
-        ```
+---
 
-    - Running a task:
+### 3. Robot Model and Control Strategy
 
-        ```bash
-        # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-        python scripts/<RL_LIBRARY>/train.py --task=<TASK_NAME>
-        ```
+#### 3.1 Robot Asset
 
-    - Running a task with dummy agents:
+* Robot configuration imported from `CRAZYFLIE_CFG`
+* Treated as an **Articulation**, but controlled as a rigid body
+* Root body identified via `find_bodies("body")`
 
-        These include dummy agents that output zero or random agents. They are useful to ensure that the environments are configured correctly.
+#### 3.2 Action Space
 
-        - Zero-action agent
+* **4-dimensional continuous action space**
 
-            ```bash
-            # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-            python scripts/zero_agent.py --task=<TASK_NAME>
-            ```
-        - Random-action agent
+  * Action[0]: total thrust (normalized)
+  * Action[1:4]: body moments (roll, pitch, yaw)
 
-            ```bash
-            # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-            python scripts/random_agent.py --task=<TASK_NAME>
-            ```
+Actions are clamped to `[-1, 1]` and mapped to physical quantities:
 
-### Set up IDE (Optional)
+* Thrust scaled by `thrust_to_weight`
+* Moments scaled by `moment_scale`
 
-To setup the IDE, please follow these instructions:
+This abstraction significantly simplifies the control problem compared to rotor-level actuation.
 
-- Run VSCode Tasks, by pressing `Ctrl+Shift+P`, selecting `Tasks: Run Task` and running the `setup_python_env` in the drop down menu.
-  When running this task, you will be prompted to add the absolute path to your Isaac Sim installation.
+---
 
-If everything executes correctly, it should create a file .python.env in the `.vscode` directory.
-The file contains the python paths to all the extensions provided by Isaac Sim and Omniverse.
-This helps in indexing all the python modules for intelligent suggestions while writing code.
+### 4. Observations and Rewards
 
-### Setup as Omniverse Extension (Optional)
+#### 4.1 Observations
 
-We provide an example UI extension that will load upon enabling your extension defined in `source/Drone/Drone/ui_extension_example.py`.
+The policy observation vector consists of:
 
-To enable your extension, follow these steps:
+* Root linear velocity (body frame)
+* Root angular velocity (body frame)
+* Projected gravity vector (body frame)
+* Relative position to the goal (body frame)
 
-1. **Add the search path of this project/repository** to the extension manager:
-    - Navigate to the extension manager using `Window` -> `Extensions`.
-    - Click on the **Hamburger Icon**, then go to `Settings`.
-    - In the `Extension Search Paths`, enter the absolute path to the `source` directory of this project/repository.
-    - If not already present, in the `Extension Search Paths`, enter the path that leads to Isaac Lab's extension directory directory (`IsaacLab/source`)
-    - Click on the **Hamburger Icon**, then click `Refresh`.
+Total observation dimension: **12**
 
-2. **Search and enable your extension**:
-    - Find your extension under the `Third Party` category.
-    - Toggle it to enable your extension.
+#### 4.2 Reward Structure
 
-## Code formatting
+The reward function balances stability and goal-reaching:
 
-We have a pre-commit template to automatically format your code.
-To install pre-commit:
+* Penalization of linear velocity magnitude
+* Penalization of angular velocity magnitude
+* Dense reward based on distance to target position
 
-```bash
-pip install pre-commit
+Distance is mapped using a hyperbolic tangent to avoid gradient saturation.
+
+---
+
+### 5. Episode Termination and Reset Logic
+
+Episodes terminate when:
+
+* The drone crashes (altitude < 0.1 m)
+* The drone flies too high (altitude > 2.0 m)
+* Maximum episode length is reached
+
+Reset logic includes:
+
+* Randomized goal position sampling
+* Randomized reset timing to avoid synchronization artifacts
+* Full reset of root pose, velocity, and joint states
+
+Extensive logging is implemented to track episodic reward components and final distance to goal.
+
+---
+
+### 6. Debug Visualization
+
+Optional debug visualization is supported via:
+
+* Cuboid markers for goal position
+* Custom environment UI window (`QuadcopterEnvWindow`)
+
+This aids qualitative inspection during development and debugging.
+
+---
+
+### 7. Execution Command
+
+The environment is intended to be executed using the following command:
+
+```
+(env_isaaclab) usuario@pc:~/Documents/Github/SkySpec/project_drone/IsaacLab/Testing/Drone$ \
+python scripts/skrl/train.py --task Template-Drone-v0
 ```
 
-Then you can run pre-commit with:
+This command relies on correct Hydra task registration and environment configuration discovery.
 
-```bash
-pre-commit run --all-files
+---
+
+### 8. Runtime Error Encountered
+
+During execution, the following critical error occurs:
+
+```
+AttributeError: module 'Drone.tasks.manager_based.drone.drone_env_cfg' has no attribute 'DroneEnvCfg'
 ```
 
-## Troubleshooting
+This error arises during Hydra-based task registration when Isaac Lab attempts to dynamically load the environment configuration class.
 
-### Pylance Missing Indexing of Extensions
+---
 
-In some VsCode versions, the indexing of part of the extensions is missing.
-In this case, add the path to your extension in `.vscode/settings.json` under the key `"python.analysis.extraPaths"`.
+### 9. Root Cause Analysis
 
-```json
-{
-    "python.analysis.extraPaths": [
-        "<path-to-ext-repo>/source/Drone"
-    ]
-}
-```
+The core issue is a **naming and registration mismatch**:
 
-### Pylance Crash
+* The configuration class is named **`QuadcopterEnvCfg`**
+* Hydra expects a class named **`DroneEnvCfg`** based on the task registration entry
+* As a result, `getattr(mod, attr_name)` fails at runtime
 
-If you encounter a crash in `pylance`, it is probable that too many files are indexed and you run out of memory.
-A possible solution is to exclude some of omniverse packages that are not used in your project.
-To do so, modify `.vscode/settings.json` and comment out packages under the key `"python.analysis.extraPaths"`
-Some examples of packages that can likely be excluded are:
+This indicates that:
 
-```json
-"<path-to-isaac-sim>/extscache/omni.anim.*"         // Animation packages
-"<path-to-isaac-sim>/extscache/omni.kit.*"          // Kit UI tools
-"<path-to-isaac-sim>/extscache/omni.graph.*"        // Graph UI tools
-"<path-to-isaac-sim>/extscache/omni.services.*"     // Services tools
-...
-```
+* The task registry entry does not match the environment configuration class name
+* Or the environment was adapted from a template without updating all registry references
+
+The remaining OmniGraph and Fabric warnings occur during shutdown and are secondary effects, not the primary failure.
+
+---
+
+### 10. Why This Error Is Non-Trivial
+
+This failure is not due to physics, control logic, or reward design, but rather to:
+
+* Tight coupling between **Hydra task names**, **Python module paths**, and **class names**
+* Lack of runtime validation before simulation startup
+* Sparse error messaging that obscures the true source of the mismatch
+
+As a result, the environment appears to initialize correctly until task loading fails late in the startup process.
+
+---
+
+### 11. Lessons Learned from Project Drone
+
+* Isaac Lab task registration is highly sensitive to naming conventions
+* Environment logic can be correct while remaining unusable due to configuration plumbing
+* Reusing templates requires systematic renaming across configs, registries, and scripts
+* Direct force-and-torque control is the most viable abstraction for drone RL in Isaac Lab
+
+---
+
+### 12. Project Status
+
+**Current state**: Environment logic implemented but not executable due to configuration mismatch.
+
+**Blocking issue**: Hydra task registration expecting `DroneEnvCfg` instead of `QuadcopterEnvCfg`.
+
+This project serves as a strong technical reference, despite being blocked at execution time.
