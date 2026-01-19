@@ -1,135 +1,280 @@
-# Template for Isaac Lab Projects
+# Project Prueba
 
-## Overview
+## Manager-Based Environment Design, Import Errors, and Analysis
 
-This project/repository serves as a template for building projects or extensions based on Isaac Lab.
-It allows you to develop in an isolated environment, outside of the core Isaac Lab repository.
+### 1. Project Overview
 
-**Key Features:**
+The **Prueba** project explores a *manager-based* reinforcement learning environment in **Isaac Lab**, targeting an end-effector pose tracking task using a **UR robotic arm with a gripper**. Unlike the Drone project, this environment follows the **ManagerBasedRLEnv** paradigm, relying heavily on modular MDP components (actions, observations, rewards, terminations, curriculum, and events).
 
-- `Isolation` Work outside the core Isaac Lab repository, ensuring that your development efforts remain self-contained.
-- `Flexibility` This template is set up to allow your code to be run as an extension in Omniverse.
+Conceptually, this project aligns very closely with official Isaac Lab manipulation examples and represents an advanced and well-structured attempt to implement a realistic manipulation task. However, execution is blocked by Python package import and initialization issues that occur before the environment can be instantiated.
 
-**Keywords:** extension, template, isaaclab
+---
 
-## Installation
+### 2. Environment Architecture
 
-- Install Isaac Lab by following the [installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html).
-  We recommend using the conda or uv installation as it simplifies calling Python scripts from the terminal.
+#### 2.1 Environment Type
 
-- Clone or copy this project/repository separately from the Isaac Lab installation (i.e. outside the `IsaacLab` directory):
+* **Base class**: `ManagerBasedRLEnvCfg`
+* **Primary configuration class**: `PruebaEnvCfg`
+* **Play configuration**: `PruebaEnvCfg_PLAY`
 
-- Using a python interpreter that has Isaac Lab installed, install the library in editable mode using:
+The environment is defined entirely through configuration classes, following Isaac Lab’s declarative MDP design philosophy.
 
-    ```bash
-    # use 'PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-    python -m pip install -e source/quadcopter
+---
 
-- Verify that the extension is correctly installed by:
+### 3. Scene and Asset Configuration
 
-    - Listing the available tasks:
+#### 3.1 Scene Definition
 
-        Note: It the task name changes, it may be necessary to update the search pattern `"Template-"`
-        (in the `scripts/list_envs.py` file) so that it can be listed.
+The scene is defined via `PruebaSceneCfg` and includes:
 
-        ```bash
-        # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-        python scripts/list_envs.py
-        ```
+* A ground plane
+* A UR robot arm with gripper (`UR_GRIPPER_CFG`)
+* A table asset loaded from NVIDIA Nucleus
+* Dome lighting for visualization
 
-    - Running a task:
+The scene supports large-scale vectorization with:
 
-        ```bash
-        # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-        python scripts/<RL_LIBRARY>/train.py --task=<TASK_NAME>
-        ```
+* **2000 parallel environments** for training
+* Adjustable spacing between environments
 
-    - Running a task with dummy agents:
+#### 3.2 Asset Sources
 
-        These include dummy agents that output zero or random agents. They are useful to ensure that the environments are configured correctly.
+Assets are resolved dynamically from the NVIDIA Nucleus server using:
 
-        - Zero-action agent
+* `NVIDIA_NUCLEUS_DIR`
+* `ISAAC_NUCLEUS_DIR`
 
-            ```bash
-            # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-            python scripts/zero_agent.py --task=<TASK_NAME>
-            ```
-        - Random-action agent
+This introduces an external dependency on correct Nucleus configuration and availability.
 
-            ```bash
-            # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-            python scripts/random_agent.py --task=<TASK_NAME>
-            ```
+---
 
-### Set up IDE (Optional)
+### 4. MDP Specification
 
-To setup the IDE, please follow these instructions:
+#### 4.1 Actions
 
-- Run VSCode Tasks, by pressing `Ctrl+Shift+P`, selecting `Tasks: Run Task` and running the `setup_python_env` in the drop down menu.
-  When running this task, you will be prompted to add the absolute path to your Isaac Sim installation.
+* Joint position control over six UR arm joints
+* Actions scaled and offset relative to default joint positions
+* Debug visualization enabled for action inspection
 
-If everything executes correctly, it should create a file .python.env in the `.vscode` directory.
-The file contains the python paths to all the extensions provided by Isaac Sim and Omniverse.
-This helps in indexing all the python modules for intelligent suggestions while writing code.
+#### 4.2 Commands
 
-### Setup as Omniverse Extension (Optional)
+* Uniformly sampled end-effector pose commands
+* Commands resampled every 4 seconds
+* Position and orientation ranges constrained to a feasible workspace
 
-We provide an example UI extension that will load upon enabling your extension defined in `source/quadcopter/quadcopter/ui_extension_example.py`.
+#### 4.3 Observations
 
-To enable your extension, follow these steps:
+The policy observation group includes:
 
-1. **Add the search path of this project/repository** to the extension manager:
-    - Navigate to the extension manager using `Window` -> `Extensions`.
-    - Click on the **Hamburger Icon**, then go to `Settings`.
-    - In the `Extension Search Paths`, enter the absolute path to the `source` directory of this project/repository.
-    - If not already present, in the `Extension Search Paths`, enter the path that leads to Isaac Lab's extension directory directory (`IsaacLab/source`)
-    - Click on the **Hamburger Icon**, then click `Refresh`.
+* Relative joint positions (with noise)
+* Relative joint velocities (with noise)
+* Current pose command
+* Previous action
 
-2. **Search and enable your extension**:
-    - Find your extension under the `Third Party` category.
-    - Toggle it to enable your extension.
+Observation corruption is enabled during training and disabled during play.
 
-## Code formatting
+#### 4.4 Rewards
 
-We have a pre-commit template to automatically format your code.
-To install pre-commit:
+Reward terms encourage accurate tracking of the commanded end-effector pose:
 
-```bash
-pip install pre-commit
+* End-effector position tracking (coarse and fine-grained)
+* End-effector orientation tracking
+* Penalties on joint velocity magnitude
+* Penalties on action rate
+
+A curriculum gradually increases penalty weights to stabilize learning.
+
+#### 4.5 Terminations and Events
+
+* Episodes terminate only on time-out
+* Joint states are randomized on reset to improve robustness
+
+---
+
+### 5. Simulation Settings
+
+Key simulation parameters:
+
+* Physics timestep: 60 Hz (`dt = 1/60`)
+* Control decimation: 2
+* Episode length: 3 seconds
+* Viewer camera positioned for global scene visibility
+
+---
+
+### 6. Execution Command
+
+The environment is intended to be launched using:
+
+```
+(env_isaaclab) usuario@pc:~/Documents/Github/SkySpec/project_drone/IsaacLab/Testing/Prueba$ \
+python scripts/skrl/train.py --task Template-Prueba-v0
 ```
 
-Then you can run pre-commit with:
+Execution relies on correct task discovery and package imports via Isaac Lab’s task registry.
 
-```bash
-pre-commit run --all-files
+---
+
+### 7. Runtime Error Encountered
+
+During startup, the following critical error occurs:
+
+```
+ImportError: cannot import name 'agents' from partially initialized module 'Prueba.tasks.manager_based'
+(most likely due to a circular import)
 ```
 
-## Troubleshooting
+This error appears during dynamic package discovery when Isaac Lab recursively imports task modules.
 
-### Pylance Missing Indexing of Extensions
+---
 
-In some VsCode versions, the indexing of part of the extensions is missing.
-In this case, add the path to your extension in `.vscode/settings.json` under the key `"python.analysis.extraPaths"`.
+### 8. Root Cause Analysis
 
-```json
-{
-    "python.analysis.extraPaths": [
-        "<path-to-ext-repo>/source/quadcopter"
-    ]
-}
+The failure is caused by a **circular import and package structure issue**:
+
+* The package `Prueba.tasks.manager_based` attempts to import an `agents` submodule
+* At import time, the parent package is only partially initialized
+* Python raises an ImportError due to the unresolved circular dependency
+
+This indicates that:
+
+* The project directory structure mirrors Isaac Lab templates, but not all expected submodules (e.g., `agents`) are fully defined or correctly placed
+* The `__init__.py` files trigger eager imports that conflict with Python’s module initialization order
+
+---
+
+### 9. Why This Error Is Subtle
+
+This issue is non-trivial because:
+
+* The environment configuration (`PruebaEnvCfg`) itself is syntactically and semantically valid
+* The failure occurs **before** Hydra loads the environment configuration
+* The error is triggered by Isaac Lab’s automatic task discovery mechanism, not by user code execution
+
+As a result, the simulation initializes successfully, but crashes during task registration.
+
+---
+
+### 10. Secondary Warnings
+
+Following the exception, several warnings appear related to:
+
+* OmniGraph category removal
+* Fabric state cleanup
+* PhysX stage detachment
+
+These warnings are shutdown artifacts and are **not the primary cause** of the failure.
+
+---
+
+### 11. Lessons Learned from Project Prueba
+
+* Manager-based environments are highly sensitive to Python package layout
+* Circular imports can silently emerge from template-based directory structures
+* Task discovery executes code eagerly, leaving little margin for partial initialization errors
+* Correct environment logic is insufficient without strict adherence to Isaac Lab’s task packaging conventions
+
+---
+
+### 12. Project Status
+
+**Current state**: Fully defined manager-based environment blocked at import time.
+
+**Blocking issue**: Circular import involving `Prueba.tasks.manager_based` and a missing or prematurely imported `agents` module.
+
+Despite being non-executable, this project demonstrates a correct and advanced use of Isaac Lab’s manager-based MDP framework.
+
+---
+
+## Project: Quadcopter (Integrated Isaac Lab Drone – First Attempt)
+
+### Objective and Rationale
+
+The *Quadcopter* project represented the first attempt to avoid custom drone assets and instead rely on an **official, integrated aerial robot provided by Isaac Lab** (the Crazyflie configuration). The rationale behind this approach was straightforward:
+
+* Reduce complexity related to USD authoring and articulation definitions.
+* Leverage a reference robot already validated by Isaac Lab developers.
+* Focus efforts on reinforcement learning logic (observations, rewards, control) rather than asset debugging.
+
+To this end, a **manager-based RL environment** (`ManagerBasedRLEnv`) was implemented, closely following Isaac Lab examples but adapted to version **0.47.5**.
+
+### Environment Design
+
+The environment (`QuadcopterEnvCfg`) was structured as a manager-based RL task with the following characteristics:
+
+* **Robot**: `CRAZYFLIE_CFG` imported from `isaaclab_assets`.
+* **Physics**: 100 Hz simulation, terrain plane, replicated physics for large-scale parallel training (4096 environments).
+* **Control**: Continuous 4D action space representing total thrust and body moments, applied via external forces and torques.
+* **Observations**: Root linear velocity, angular velocity, projected gravity, and relative goal position.
+* **Rewards**: Penalization of linear and angular velocity magnitude, and shaped reward for distance to a sampled 3D goal.
+* **Execution**: Training via SKRL PPO using Hydra configuration.
+
+To maintain compatibility with Isaac Lab 0.47.5, **all manager configuration dictionaries** (`actions`, `observations`, `rewards`, `commands`, `terminations`, `curriculum`) were intentionally defined as **empty dictionaries**, acting as placeholders. This was done to avoid import errors from newer APIs not present in the installed version.
+
+### Execution Command
+
+The environment was launched using the following command:
+
+```
+(env_isaaclab) usuario@pc:~/Documents/Github/SkySpec/project_drone/IsaacLab/Testing/quadcopter$ \
+python scripts/skrl/train.py --task Template-Quadcopter-v0
 ```
 
-### Pylance Crash
+### Observed Runtime Behavior
 
-If you encounter a crash in `pylance`, it is probable that too many files are indexed and you run out of memory.
-A possible solution is to exclude some of omniverse packages that are not used in your project.
-To do so, modify `.vscode/settings.json` and comment out packages under the key `"python.analysis.extraPaths"`
-Some examples of packages that can likely be excluded are:
+At runtime, the simulation:
 
-```json
-"<path-to-isaac-sim>/extscache/omni.anim.*"         // Animation packages
-"<path-to-isaac-sim>/extscache/omni.kit.*"          // Kit UI tools
-"<path-to-isaac-sim>/extscache/omni.graph.*"        // Graph UI tools
-"<path-to-isaac-sim>/extscache/omni.services.*"     // Services tools
-...
+* Successfully launched Isaac Sim.
+* Created and replicated the scene (4096 environments).
+* Loaded terrain, robot articulation, lighting, and physics correctly.
+* Initialized managers for **commands, events, and recorders** without fatal errors.
+
+However, execution consistently failed during environment initialization, *before the first RL step*, with the following critical exception:
+
 ```
+AttributeError: 'ActionManager' object has no attribute '_terms'
+```
+
+### Root Cause Analysis
+
+This error originates inside Isaac Lab’s `ActionManager` during the `load_managers()` phase. Specifically:
+
+* `ActionManager` assumes that at least one **action term** has been registered.
+* When `cfg.actions` is an empty dictionary, the internal `_terms` attribute is **never initialized**.
+* Subsequent calls to `total_action_dim` attempt to iterate over `self._terms.values()`, resulting in an attribute access failure.
+
+This behavior reveals a **hard assumption in the manager-based API**: empty manager dictionaries are *not supported*, even though they appear syntactically valid.
+
+### Why This Was Non-Trivial to Fix
+
+This issue is subtle and non-obvious for several reasons:
+
+1. **No validation error** is raised at configuration parsing time.
+2. The scene and simulation start successfully, giving the impression that the setup is correct.
+3. The failure occurs deep inside Isaac Lab internals, far removed from user-defined code.
+4. The intended workaround (defining minimal action terms) requires importing manager term classes that:
+
+   * Either do not exist in Isaac Lab 0.47.5, or
+   * Differ significantly from newer documentation and examples.
+
+As a result, the project reached a **deadlock**: empty managers cause runtime crashes, but defining valid managers requires APIs unavailable in the installed version.
+
+### Outcome and Lessons Learned
+
+This attempt demonstrated that:
+
+* Using an *official Isaac Lab quadcopter* does **not eliminate environment-level compatibility issues**.
+* The manager-based framework in version 0.47.5 is **not robust to partial or placeholder configurations**.
+* There is a strong coupling between Isaac Lab version, manager APIs, and example code.
+
+Despite correct physics setup and robot instantiation, the environment could not progress to training due to **framework-level assumptions** rather than modeling or control errors.
+
+### Key Takeaway
+
+The failure of the Quadcopter project was **not due to drone dynamics, RL logic, or asset definition**, but rather to a mismatch between:
+
+* The documented manager-based workflow, and
+* The actual guarantees enforced internally by Isaac Lab 0.47.5.
+
+This reinforced the broader conclusion across all drone-related experiments: **Isaac Lab version alignment is a first-order constraint**, and manager-based environments cannot be safely prototyped using incomplete configurations.
