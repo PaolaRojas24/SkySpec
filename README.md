@@ -122,5 +122,3 @@ Core technical workspace for drone simulation and experimentation.
 * **Unity**
 * **Python**
 * **USD (Universal Scene Description)**
-* Simplificar aún más para público **no técnico**, o
-* Crear un **README corto** y uno **técnico extendido** separados.
